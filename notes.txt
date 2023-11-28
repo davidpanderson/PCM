@@ -1,0 +1,183 @@
+parallel computing simulator
+
+goal: study the combination of
+- parallel computing manager (PCM) policy:
+    what hosts to use and when
+- distributed algorithm
+    e.g. neural net training
+
+metrics:
+- job throughput and completion time statistics    
+- efficiency (% idle and wasted FLOPs)
+
+simulate:
+- population of hosts with different
+    - processor speed
+        maybe model as bimodal CPU/GPU
+    - availability: model as exp distributed
+        on/off times with different means.
+    - upload, download network BW
+    more complex:
+        multiple processors on 1 host
+        network proximity
+
+- parallel computing manager (PCM)
+    it knows about hosts and their current availability
+    it gets a sequence of computing requests (CR)
+        of various sizes and possibly deadlines or priorities.
+    it dynamically assigns hosts to CRs
+
+    possible notion: 'category' of host
+        (speed, availability, bandwidth)
+
+    basic model
+        when a CR arrives, the PCM decides how to partition it,
+        and how many hosts to use
+        (and maybe what category)
+        The PCM waits until that many hosts are available,
+        and starts them.
+        If a host leaves, PCM waits until a new one is available
+        (possibly suspending the other hosts)
+
+    preemption
+        If a CR arrives that has higher priority than current CRs,
+        the PCM can preempt the current CRs on some or all hosts;
+        those CRs are suspended.
+    
+    dynamic partition
+        the partition of a CR is dynamic:
+        the number of hosts can change on the fly.
+        Initially the PCM gives it some number of hosts,
+        based on the current conditions.
+        If hosts leave, and no new ones are available,
+        the PCM repartitions the CR.
+        No preemption: once a CR is run on a host,
+        it continues until done or the host leaves.
+
+    preemption + dynamic partition
+        When the PCM preempts hosts for a current CR,
+        the current CR is repartitioned and continues.
+
+model of computation:
+    2-level model:
+    hosts are divided into groups
+        hosts in a group should be about the same FLOPS
+        The groups should have about same total FLOPS;
+        size of groups is determined by this.
+        e.g. could have groups of 100 hosts w/ CPU
+        and 10 hosts w/ GPUs
+
+    job parameters
+        A: max # of hosts per group
+        B: max # of groups
+        C: max variation in FLOPS within a group
+        D: max variation in FLOPS between groups
+
+    the PCM tries to maximize total FLOPS subject to the above.
+    Notes:
+    1) the groups can be sequences of hosts in the FLOPS ordering
+    2) You may not be able to use some hosts.
+        e.g. if you have 10 5 1 1 1 1 ...
+        and C and D are 1.1, you won't use the 5
+         
+    sketch of algorithm:
+        order available hosts by decreasing FLOPS
+        G = current group
+        FG = max FLOPS in G
+        MG = mean FLOPS in G
+        S = set of accepted groups
+        F = max mean FLOPS of S
+        G = {fastest host}
+        loop over other hosts H
+            If flops(H) is close to FG
+                add H to G
+            else
+                (can't put H in current group;
+                    see if it's fast enough to accept)
+                if MG is close to F
+                    add G to S
+                    if S has enough groups
+                        break
+                else
+                    (can't use the hosts in G)
+                G = {H}
+        if MG is close to F
+            add G to S
+
+        The above isn't right.
+        Suppose you have 10 very fast hosts, and a lot of slower ones.
+        Let's say A is 10.
+        The above would make a group of the 10 fastest hosts,
+        and then no other group of <= 10 hosts would be within D of it.
+        It would be better to make 10 single-host groups,
+        followed by a lot of groups of 10 hosts.
+
+        Also, in some cases you might want to skip the fast hosts altogether.
+        They might be so fast that no group of slow hosts is within D.
+        If you use any of the fast hosts,
+        you won't be able to use any of the slow hosts.
+
+        Possible general approach:
+        Let X be an upper bound on mean group FLOPS.
+        Scan over a decreasing set of values of X.
+        This could start at the sum of the first A hosts.
+        Compute group set (could be null)
+        Progressively halve X.
+        Continue until total flops decreases.
+
+    What about RAM and disk usage?
+    This could impose a min # of host/gp or # gps
+    let G be #groups, N be hosts in a group
+    cases:
+    1) (divide by data, then by model)
+        outer storage is disk; req is X/G
+        inner storage is RAM; req is Y/N
+    2) (divide by model, then by data)
+        disk space req is Y/N
+        RAM req is X/G
+    
+    To enforce this:
+    inner storage:
+        when about to accept a group,
+        compute the Y/N requirement.
+        If any hosts don't meet it,
+        remove them from the group,
+        don't accept it, and continue scanning.
+    outer storage:
+        for a given #groups N the req is X/N
+        X/P.max_groups is the smallest possible requirement.
+        for i=P.max_groups .. 1
+            min_outer = X/i
+            compute groups set with that min outer
+            If the result #groups is >= i, return that
+        return null
+
+        min_outer = 0
+        loop
+            find group set
+            compute the X/G requirement, say Z.
+            if all hosts have at least Z
+                done; break
+            if Z < outer_req
+                return null
+
+App properties
+    (e.g. ML training; separate from PCM)
+    per host:
+        synchronous within group:
+            each 'step': do X FLOPs of computing
+            exchange data w/ all hosts in group
+            (may have to wait)
+    after N steps
+        a representative from each group
+        (maybe most bandwidth)
+        exchange data with reps of other groups
+        (may have to wait)
+    could also have asynchrony at either or both levels
+
+---------------------
+
+If a host disappears during a computation:
+replace it with the slowest host
+that satisfies speed constraints
+(within and across groups) and storage constraints.
