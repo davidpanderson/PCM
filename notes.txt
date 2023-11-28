@@ -181,3 +181,36 @@ If a host disappears during a computation:
 replace it with the slowest host
 that satisfies speed constraints
 (within and across groups) and storage constraints.
+---------------------
+overall:
+
+PCM server keeps track of
+    hosts (whether alive, whether committed)
+    jobs in progress
+
+stable storage:
+    MySQL?  JSON files?  synchronization?
+in-memory
+    shared mem segment? C++ format? fixed address
+
+proposal:
+    PCM server is C++ (or python?)
+    handles requests (serially) from local web scripts (PHP)
+        JSON over Unix-domain sockets
+    keeps everything in RAM
+    set of hosts is kept in JSON file
+        don't really need this - can reconstruct from heartbeats
+    active jobs are kept in JSON files
+
+APIs: (JSON over HTTPS)
+    job submitters
+        submit job; returns group set
+        query job: returns changes to group set
+        job done
+
+    app (sporadic)
+        get job
+        heartbeat
+        can't continue job
+        job finished
+        job failed
