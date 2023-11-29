@@ -4,22 +4,25 @@
 #include <vector>
 #include <algorithm>
 
+#include "host.h"
+
 using std::vector;
 
-#define DEBUG   1
+#define DEBUG
+    // show final solution
+#define DEBUG2
+    // show params and solution flops of find_league2() calls
+//#define DEBUG2_SOL
+    // show solution of find_league2() calls
+#define DEBUG3
+    // show params and solution flops of find_league3() calls
+//#define DEBUG3_SOL
+    // show solution of find_league3() calls
+//#define DEBUG3_DET
+    // show details of find_league3()
+//#define DEBUG3_DET2
+    // show extreme details of find_league3()
 
-struct HOST {
-    double flops;
-    double outer_storage;
-    double inner_storage;
-    int id;
-    HOST(double f, double so, double si, int i) {
-        flops = f;
-        outer_storage = so;
-        inner_storage = si;
-        id = i;
-    }
-};
 
 struct JOB_PARAMS {
     int max_hosts_per_team;
@@ -119,6 +122,7 @@ struct TEAM {
             h2.push_back(hosts[i]);
         }
         hosts = h2;
+        update();
     }
 };
 
@@ -141,6 +145,7 @@ struct LEAGUE {
         total_flops += t.total_flops;
     }
     void print() {
+        printf("-----------------\nTotal FLOPS: %f\n", total_flops);
         for (unsigned int i=0; i<teams.size(); i++) {
             TEAM &t = *teams[i];
             printf("team %d:\n", i);
@@ -155,7 +160,7 @@ struct LEAGUE {
 };
 
 bool compare(HOST* h1, HOST* h2) {
-    return h1->flops > h2->flops;
+    return h1->flops > h2->flops || (h1->flops==h2->flops && h1->id<h2->id);
 }
 
 // Find a league given the constraints that
@@ -175,7 +180,7 @@ void find_league3(
 ) {
     TEAM c;        // in-progress candidate team
 
-#ifdef DEBUG
+#ifdef DEBUG3
     printf(
         "find_league3() start: max_team_flops %f, min_outer_storage %f\n",
         max_team_flops, min_outer_storage
@@ -184,17 +189,17 @@ void find_league3(
     league.clear();
     for (unsigned int i=0; i<hosts.size(); i++) {
         if (league.teams.size() == params.max_teams) {
-#ifdef DEBUG
+#ifdef DEBUG3_DET
             printf("reached max teams\n");
 #endif
             break;
         }
         HOST& h = *hosts[i];
-#ifdef DEBUG
+#ifdef DEBUG3_DET
         printf("scan host %d: flops %f\n", h.id, h.flops);
 #endif
         if (h.outer_storage < min_outer_storage) {
-#ifdef DEBUG
+#ifdef DEBUG3_DET
             printf("insufficient outer storage %f\n", h.outer_storage);
 #endif
             continue;
@@ -212,7 +217,7 @@ void find_league3(
                     if (c.prune_inner_storage(params.size_inner)) {
                         continue;
                     }
-#ifdef DEBUG
+#ifdef DEBUG3_DET
                     printf("add team 1\n");
                     c.print();
 #endif
@@ -230,7 +235,7 @@ void find_league3(
                         if (c.prune_inner_storage(params.size_inner)) {
                             continue;
                         }
-#ifdef DEBUG
+#ifdef DEBUG3_DET
                         printf("add team 2\n");
                         c.print();
 #endif
@@ -250,7 +255,7 @@ void find_league3(
                             c.remove(h);
                             continue;
                         }
-#ifdef DEBUG
+#ifdef DEBUG3_DET
                         printf("add team 3\n");
                         c.print();
 #endif
@@ -272,6 +277,12 @@ void find_league3(
             //
             while (1) {
                 double x = c.total_flops + h.flops;
+#ifdef DEBUG3_DET2
+                printf("x %f mtf %f flops0 %f max var %f prod %f\n",
+                    x, max_team_flops, league.flops0, params.max_var_teams,
+                    league.flops0*params.max_var_teams
+                );
+#endif
                 if (x > max_team_flops
                     || (!params.aggressive && x > league.flops0*params.max_var_teams)
                 ) {
@@ -287,12 +298,15 @@ void find_league3(
                         // Remove the first host from C and see if this
                         // changes things.
                         //
+#ifdef DEBUG3_DET
+                        printf("remove first 1\n");
+#endif
                         c.remove_first();
                         continue;
                     }
                     // accept C; the new candidate team is {H}
                     //
-#ifdef DEBUG
+#ifdef DEBUG3_DET
                     printf("add team 4\n");
                     c.print();
 #endif
@@ -317,6 +331,9 @@ void find_league3(
                             goto next_host;
                         }
                         if (c.total_flops < league.flops0/params.max_var_teams) {
+#ifdef DEBUG3_DET
+                        printf("remove first 2\n");
+#endif
                             c.remove_first();
                             continue;
                         }
@@ -338,7 +355,7 @@ void find_league3(
                     // if C is at least league.flops0, accept it
                     //
                     if (c.total_flops >= league.flops0) {
-#ifdef DEBUG
+#ifdef DEBUG3_DET
                         printf("add team 6\n");
                         c.print();
 #endif
@@ -353,7 +370,7 @@ void find_league3(
                         if (c.total_flops > league.flops0/params.max_var_teams) {
                             // yes - accept C
                             //
-#ifdef DEBUG
+#ifdef DEBUG3_DET
                             printf("add team 7\n");
                             c.print();
 #endif
@@ -376,14 +393,19 @@ done:
     // see if the candidate team is acceptable
     c.prune_inner_storage(params.size_inner);
     if (c.total_flops > league.flops0/params.max_var_teams) {
-#ifdef DEBUG
+#ifdef DEBUG3_DET
         printf("add team 8\n");
         c.print();
 #endif
         league.add_team(c);
     }
-#ifdef DEBUG
-    printf("find_league3() done:\n");
+#ifdef DEBUG3
+    printf("find_league3() done: %ld teams, %f flops\n",
+        league.teams.size(), league.total_flops
+    );
+#endif
+#ifdef DEBUG3_SOL
+    printf("find_league3() solution:\n");
     league.print();
 #endif
 }
@@ -395,7 +417,7 @@ void find_league2(
     vector<HOST*> &hosts, JOB_PARAMS &params, LEAGUE &league,
     double max_team_flops
 ) {
-#ifdef DEBUG
+#ifdef DEBUG2
     printf("find_league2() start: max_team_flops %f\n", max_team_flops);
 #endif
     for (int i=params.max_teams; i>0; i--) {
@@ -404,16 +426,21 @@ void find_league2(
             hosts, params, league, max_team_flops, min_outer_storage
         );
         if (league.teams.size() >= i) {
-#ifdef DEBUG
-            printf("find_league2(): success\n");
+#ifdef DEBUG2
+            printf("find_league2() done: %ld teams, %f flops\n",
+                league.teams.size(), league.total_flops
+            );
+#endif
+#ifdef DEBUG2_SOL
+            printf("find_league2() solution:\n");
             league.print();
 #endif
             return;
         }
     }
     // nothing worked
-#ifdef DEBUG
-    printf("find_league2(): fail\n");
+#ifdef DEBUG2
+    printf("find_league2(): failed\n");
 #endif
     league.clear();
 }
@@ -428,44 +455,35 @@ void find_league(
     vector<HOST*> &hosts, JOB_PARAMS &params, LEAGUE &league
 ) {
     sort(hosts.begin(), hosts.end(), compare);
-    double max_team_flops = hosts[0]->flops*params.max_hosts_per_team;
+    double max_team_flops = 0;
     double best = 0;
-    while (1) {
+    for (unsigned int i=0; i<hosts.size(); i++) {
+        if (i>=params.max_hosts_per_team) break;
+        max_team_flops += hosts[i]->flops;
         LEAGUE lg2;
         find_league2(hosts, params, lg2, max_team_flops);
 #ifdef DEBUG
-        printf("find_league: solution %f best %f\n", lg2.total_flops, best);
+        printf("find_league(): solution %f is best %f\n",
+            lg2.total_flops, best
+        );
 #endif
-        if (lg2.total_flops <= best) {
+        if (lg2.total_flops > best) {
+            league = lg2;
+            best = lg2.total_flops;
+        }
+
+        // if first team is as large as it's going to get,
+        // there's no reason to increase flops limit further
+        //
+        if (lg2.teams[0]->hosts.size() < i) {
             break;
         }
-        best = lg2.total_flops;
-        max_team_flops /= 2;
-        league = lg2;
     }
 }
 
-int main(int, char**) {
+int main(int argc, char** argv) {
     vector<HOST*> hosts;
     JOB_PARAMS params;
-
-    int id=1;
-    hosts.push_back(new HOST(1.0, 10, .5, id++));
-    hosts.push_back(new HOST(.9, 10, 10, id++));
-    hosts.push_back(new HOST(.6, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
-    hosts.push_back(new HOST(.2, 10, 10, id++));
 
     params.max_hosts_per_team = 20;
     params.max_teams = 4;
@@ -475,9 +493,21 @@ int main(int, char**) {
     params.size_inner = 10;
     params.aggressive = false;
 
+    make_hosts_test(hosts);
+
     LEAGUE league;
-    //find_league(hosts, params, league);
-    find_league3(hosts, params, league, 1.5, 0);
+    if (argc > 1) {
+        // max team flops; avoid grouping 1st 2
+        find_league3(hosts, params, league, 2.5, 0);
+    } else {
+        find_league(hosts, params, league);
+    }
+#ifdef DEBUG
+    printf("final: %ld teams %f flops\n",
+        league.teams.size(), league.total_flops
+    );
+    printf("final solution:\n");
     league.print();
+#endif
 
 }
